@@ -1,0 +1,18 @@
+# file: .gitignore
+
+# --- IntelliJ IDEA ---
+.idea
+*.iml
+
+
+# --- Python ---
+venv
+
+
+# --- K Desktop Environment ("KDE") ---
+.directory
+
+
+# --- Mac OS X / macOS ---
+.DS_Store
+
