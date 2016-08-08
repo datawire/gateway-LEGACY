@@ -37,7 +37,7 @@ import logging
 import os
 import toml
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('listener')
 
 

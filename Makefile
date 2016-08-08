@@ -47,7 +47,11 @@ run-dev: venv
 
 run-docker: docker
 	# Run the service or application in production mode.
-	docker run --rm --name datawire-gateway -it -p :5000 datawire/gateway
+	docker run --rm --name datawire-gateway -it -p 8080:32990 datawire/gateway:$(VERSION)
+
+run-docker-no-rebuild:
+	# Run the service or application in production mode.
+	docker run --rm --net="host" --name datawire-gateway -e DATAWIRE_TOKEN=$(DATAWIRE_TOKEN) -it -p 7888:7888 -p 32990:32990 datawire/gateway:$(VERSION)
 	
 test: venv
 	# Run the full test suite.

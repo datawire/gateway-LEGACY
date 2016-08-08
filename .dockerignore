@@ -1,6 +1,21 @@
-Dockerfile
-.gitignore
+# --- Git ---
 .git
-README.*
-LICENSE
-NOTICE
+.gitignore
+
+# --- Docker ---
+Dockerfile
+.dockerignore
+
+# --- IntelliJ IDEA ---
+.idea
+*.iml
+
+# --- Packer ---
+packer.json
+
+# --- Python ---
+virtualenv
+venv
+
+# --- Quark ---
+quark

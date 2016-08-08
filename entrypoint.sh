@@ -14,4 +14,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-traefik -c
+(python listener.py listen rules.toml &) && ./traefik -c traefik.toml -d
