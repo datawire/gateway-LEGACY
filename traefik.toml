@@ -30,7 +30,7 @@
 # Optional
 # Default: "2s"
 #
-ProvidersThrottleDuration = "5s"
+ProvidersThrottleDuration = 5
 
 # If non-zero, controls the maximum idle (keep-alive) to keep per-host.  If zero, DefaultMaxIdleConnsPerHost is used.
 # If you encounter 'too many open files' errors, you can either change this value, or change `ulimit` value.
@@ -45,6 +45,9 @@ defaultEntryPoints=["http"]
   [entryPoints.http]
   address = ":32990"
 
+[web]
+address = ":7888"
+
 [file]
-filename = "/opt/gateway/rules.toml"
+filename = "rules.toml"
 watch    = true
