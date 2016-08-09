@@ -32,6 +32,8 @@ Options:
 
 from docopt import docopt
 from mdk_discovery import Discovery
+from mdk_runtime import defaultRuntime, Schedule, Happening
+from mdk import init
 
 import logging
 import os
@@ -43,8 +45,8 @@ logger = logging.getLogger('listener')
 
 class ApiGatewayDiscovery(Discovery):
 
-    def __init__(self, route_manager):
-        Discovery.__init__(self)
+    def __init__(self, runtime, route_manager):
+        Discovery.__init__(self, runtime)
         self.route_manager = route_manager
 
     def _expire(self, node):
@@ -58,13 +60,32 @@ class ApiGatewayDiscovery(Discovery):
 
 class RouteManager(object):
 
-    def __init__(self, rules_file, update=True, debug=False):
+    empty_rules_toml = """[frontends]
+
+[backends]
+    """
+
+    def __init__(self, scheduler, scheduler_delay, rules_file, update=True, debug=False):
+        self.scheduler = scheduler
+        self.scheduler_delay = int(scheduler_delay)
         self.rules_file = rules_file
         self.debug = debug
         self.update = update
         self.frontends = {}
         self.backends = {}
         self.modified = False
+
+    def _schedule_flush(self):
+        self.dispatcher.tell(self, Schedule("rules:flush", self.scheduler_delay), self.scheduler)
+
+    def onStart(self, dispatcher):
+        self.dispatcher = dispatcher
+        self._schedule_flush()
+
+    def onMessage(self, origin, message):
+        if isinstance(message, Happening) and message.event == "rules:flush":
+            self.write_rules()
+            self._schedule_flush()
 
     def add_frontend(self, active):
         fe_id = active.service
@@ -91,7 +112,7 @@ class RouteManager(object):
 
     def add_backend(self, active):
         be_id = active.service
-        props = active.properties
+        props = active.properties if active.properties is not None else {}
 
         if be_id not in self.backends:
             logger.debug("Adding new backend (id: %s)", be_id)
@@ -117,33 +138,44 @@ class RouteManager(object):
 
         if node_id in be_servers:
             del be_servers[node_id]
+            if len(be_servers) == 0:
+                del self.backends[be_id]
 
     def add_service_route(self, active):
         self.add_frontend(active)
         self.add_backend(active)
         self.modified = True
-        self.write_rules()
 
     def remove_service_route(self, expire):
         self.remove_backend(expire)
         self.remove_frontend(expire)
-        self.write_rules()
+        self.modified = True
 
     def write_rules(self):
-        if not self.modified:
-            logger.debug("Routing rules not modified. Routing rules file will not be rewritten.")
+        if self.modified:
+            logger.info("Routing rules modified. Routing rules file will be rewritten.")
 
-        rules = {'frontends': self.frontends, 'backends':  self.backends}
-        rules_toml = toml.dumps(rules)
+            #
+            # This is pretty funky but the problem is the Python TOML lib either has a bug or TOML is allowed to emit
+            # an empty string for a map that is effectively empty (which seems strange... but I don't know enough about
+            # TOML to say one way or another.
+            #
+            # Traefik won't load an empty config so if ALL routes are removed on a rewrite because the TOML lib emits
+            # bad data then the routes won't be reloaded. To force all routes to be evicted we have handle the empty
+            # case by shoving a static string into the file rather than relying on the emitter.
+            #
+            # Hooray for stupid esoteric configuration formats!
+            #
+            rules = {'frontends': self.frontends, 'backends':  self.backends}
+            rules_toml = self.empty_rules_toml
+            if rules != {'frontends': {}, 'backends': {}}:
+                rules_toml = toml.dumps(rules)
 
-        logger.debug("""
---- RULES DUMP (DEBUG MODE) ---
-{}
---- RULES DUMP (DEBUG MODE) ---""".format(rules_toml))
-
-        if self.update:
-            with open(self.rules_file, 'w+') as f:
-                f.write(rules_toml)
+            if self.update:
+                with open(self.rules_file, 'w+') as f:
+                    f.write(rules_toml)
+        else:
+            logger.info("Routing rules not modified. Routing rules file will not be rewritten.")
 
 
 def listen(args):
@@ -160,8 +192,14 @@ def listen(args):
     else:
         logger.warn("Configured to not update routing rules. Started with (--no-update) flag.")
 
-    routes = RouteManager(rules_file, update=update)
-    disco = ApiGatewayDiscovery(routes).withToken(os.getenv("DATAWIRE_TOKEN")).connect().start()
+    mdk = init()
+    mdk_runtime = defaultRuntime()
+
+    routes = RouteManager(mdk_runtime.getScheduleService(), 5, rules_file, update=update)
+    mdk_runtime.dispatcher.startActor(routes)
+
+    mdk._disco = ApiGatewayDiscovery(mdk_runtime, routes).withToken(os.getenv("DATAWIRE_TOKEN")).connect().start()
+    mdk.start()
 
 
 def run_listener(args):
