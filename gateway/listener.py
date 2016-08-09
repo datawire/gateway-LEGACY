@@ -60,10 +60,11 @@ class ApiGatewayDiscovery(Discovery):
 
 class RouteManager(object):
 
-    empty_rules_toml = """[frontends]
+    _EMPTY_RULES_TOML = """
+[frontends]
 
 [backends]
-    """
+"""
 
     def __init__(self, scheduler, scheduler_delay, rules_file, update=True, debug=False):
         self.scheduler = scheduler
@@ -155,19 +156,43 @@ class RouteManager(object):
         if self.modified:
             logger.info("Routing rules modified. Routing rules file will be rewritten.")
 
+            # The below code creates the appropriate dictionary structure for the Traefik routing file. However, there
+            # is an issue and I do not know whether it is related to the Python's TOML emitter, Traefik's Go TOML parser
+            # or an issue with the TOML specification I do not clearly understand.
             #
-            # This is pretty funky but the problem is the Python TOML lib either has a bug or TOML is allowed to emit
-            # an empty string for a map that is effectively empty (which seems strange... but I don't know enough about
-            # TOML to say one way or another.
+            # The situation is this:
+            # ----------------------
             #
-            # Traefik won't load an empty config so if ALL routes are removed on a rewrite because the TOML lib emits
-            # bad data then the routes won't be reloaded. To force all routes to be evicted we have handle the empty
-            # case by shoving a static string into the file rather than relying on the emitter.
+            #   1. Traefik can have zero routes in it (default state).
+            #   2. Traefik expects that the routes file be "well-formed" and contain "frontends" and "backends"
+            #      sections regardless of whether they are empty (no routes) or populated (some routes).
+            #   3. The Python TOML library interprets Python dictionary {'frontends': {}, 'backends': {}} as empty and
+            #      emits TOML that looks like this " ".
+            #   4. The Python TOML library seems incorrect. I would expect the serialized form to be near equivalent to
+            #
+            #        """
+            #        [frontends]
+            #
+            #        [backends]
+            #
+            #        """
+            #
+            #   5. The Traefik Go TOML parser does not accept empty nothingness OR the Traefik server decides a blank
+            #      file is invalid and does not reload.
+            #   6. Because Traefik does not reload then old routes stay in the server when a situation where ALL
+            #      [frontends] and [backends] are removed.
+            #
+            # Resolution:
+            # ----------
+            #
+            #   1. When there are no frontends or backends to emit (the {'frontends': {}, 'backends': {}} case) then
+            #      the program should output the statically defined string described above in <4>.
+            #   2. When there are frontends or backends to emit then the Python TOML library should be used.
             #
             # Hooray for stupid esoteric configuration formats!
             #
             rules = {'frontends': self.frontends, 'backends':  self.backends}
-            rules_toml = self.empty_rules_toml
+            rules_toml = RouteManager._EMPTY_RULES_TOML
             if rules != {'frontends': {}, 'backends': {}}:
                 rules_toml = toml.dumps(rules)
 
