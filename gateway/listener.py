@@ -63,8 +63,7 @@ class RouteManager(object):
         self.debug = debug
         self.update = update
         self.frontends = {}
-        self.backends = {}         # "backends.${service-name}   -> ${backend-config}"
-        self.backend_servers = {}  # "backend_id -> { properties.datawire_nodeId -> node.address }"
+        self.backends = {}
         self.modified = False
 
     def add_frontend(self, active):
@@ -83,7 +82,12 @@ class RouteManager(object):
             fe_routes['api'] = {}
 
         fe_routes['api'] = {'rule': 'PathPrefixStrip: /{}'.format(active.service)}
-        self.modified = True
+
+    def remove_frontend(self, expire):
+        fe_id = expire.service
+
+        if fe_id not in self.backends:
+            del self.frontends[fe_id]
 
     def add_backend(self, active):
         be_id = active.service
@@ -101,7 +105,18 @@ class RouteManager(object):
         be_servers = self.backends[be_id]['servers']
         be_servers[node_id] = {'url': active.address}
 
-        self.modified = True
+    def remove_backend(self, expire):
+        be_id = expire.service
+        props = expire.properties if expire.properties is not None else {}
+
+        if be_id not in self.backends:
+            return
+
+        node_id = props['datawire_nodeId']
+        be_servers = self.backends[be_id]['servers']
+
+        if node_id in be_servers:
+            del be_servers[node_id]
 
     def add_service_route(self, active):
         self.add_frontend(active)
@@ -109,8 +124,10 @@ class RouteManager(object):
         self.modified = True
         self.write_rules()
 
-    # def remove_service_route(self, expire):
-    #    logger.info("Adding service route {}".format(expire))
+    def remove_service_route(self, expire):
+        self.remove_backend(expire)
+        self.remove_frontend(expire)
+        self.write_rules()
 
     def write_rules(self):
         if not self.modified:
