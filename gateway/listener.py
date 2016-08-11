@@ -58,6 +58,7 @@ class RouteManager(object):
         if not isinstance(traefik_client, TraefikClient):
             raise ValueError("traefik_client is not a valid instance of TraefikClient")
 
+        self.dispatcher = None
         self._traefik = traefik_client
         self.frontends = {}
         self.backends = {}
@@ -67,16 +68,16 @@ class RouteManager(object):
         self.dispatcher = dispatcher
 
     def onMessage(self, origin, message):
-        if isinstance(message, NodeActive):
-            logger.info("Handling NodeActive")
-            self.__upsert_frontend(message)
-            self.__upsert_backend(message)
+        if isinstance(message, NodeActive) or isinstance(message, NodeExpired):
+            if isinstance(message, NodeActive):
+                self.__upsert_frontend(message)
+                self.__upsert_backend(message)
+            elif isinstance(message, NodeExpired):
+                self.__remove_frontend(message)
+                self.__remove_backend(message)
+
             self.__reconfigure()
-        elif isinstance(message, NodeExpired):
-            logger.info("Handling NodeExpired")
-            self.__remove_frontend(message)
-            self.__remove_backend(message)
-            self.__reconfigure()
+
 
     def __reconfigure(self):
         routes = {'frontends': self.frontends, 'backends': self.backends}
@@ -94,7 +95,7 @@ class RouteManager(object):
         be_id = fe_id
 
         if fe_id not in self.frontends:
-            logger.debug("Adding new frontend (id: %s)", fe_id)
+            logger.info("Adding new frontend (id: %s)", fe_id)
             self.frontends[fe_id] = {'backend': be_id, 'routes': {}}
 
         fe = self.frontends[fe_id]
@@ -111,6 +112,7 @@ class RouteManager(object):
         fe_id = node.service
 
         if fe_id in self.frontends:
+            logger.info("Removing frontend (id: %s)", fe_id)
             del self.frontends[fe_id]
 
     def __upsert_backend(self, active):
@@ -119,7 +121,7 @@ class RouteManager(object):
         props = node.properties if node.properties is not None else {}
 
         if be_id not in self.backends:
-            logger.debug("Adding new backend (id: %s)", be_id)
+            logger.info("Adding new backend (id: %s)", be_id)
             self.backends[be_id] = {
                 'LoadBalancer': {'method': 'drr'},
                 'servers': {}
@@ -136,6 +138,7 @@ class RouteManager(object):
         props = node.properties if node.properties is not None else {}
 
         if be_id in self.backends:
+            logger.info("Removing backend (id: %s)", be_id)
             node_id = props['datawire_nodeId']
             be_servers = self.backends[be_id]['servers']
 
