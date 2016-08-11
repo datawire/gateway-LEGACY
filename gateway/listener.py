@@ -19,78 +19,78 @@
 Watch the Datawire Discovery's event stream to build a routing configuration for Traefik (https://traefik.io)
 
 Usage:
-    listener.py listen [options] <rules-file>
+    listener.py listen [options]
     listener.py (-h | --help)
     listener.py --version
 
 Options:
-    --debug             Enable debug mode. Debug mode enables additional logging AND runs as if in (--non-update).
-    -h --help           Show the help.
-    --no-update         Run in non-update mode. Traefik will not be informed of changes. [default: True]
-    --version           Show the version.
+    --debug                 Enable debug mode. Debug mode enables additional logging AND runs as if in (--no-update).
+    -h --help               Show the help.
+    --no-update             Run in non-update mode. Traefik will not be informed of changes. [default: True]
+    --traefik-addr=<addr>   The Traefik server address [default: localhost:8000]
+    --version               Show the version.
 """
 
 from docopt import docopt
-from mdk_discovery import Discovery
+from mdk_discovery import NodeActive, NodeExpired, CircuitBreakerFactory
 from mdk_runtime import defaultRuntime, Schedule, Happening
-from mdk import init
+from traefik import TraefikClient
 
+from gateway import log_format
 import logging
+import mdk_discovery
 import os
-import toml
+import sys
 
-logging.basicConfig(level=logging.INFO)
+from pythonjsonlogger import jsonlogger
+
 logger = logging.getLogger('listener')
-
-
-class ApiGatewayDiscovery(Discovery):
-
-    def __init__(self, runtime, route_manager):
-        Discovery.__init__(self, runtime)
-        self.route_manager = route_manager
-
-    def _expire(self, node):
-        super(ApiGatewayDiscovery, self)._expire(node)
-        self.route_manager.remove_service_route(node)
-
-    def _active(self, node):
-        super(ApiGatewayDiscovery, self)._active(node)
-        self.route_manager.add_service_route(node)
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler(sys.stdout)
+formatter = jsonlogger.JsonFormatter(log_format)
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 
 class RouteManager(object):
 
-    _EMPTY_RULES_TOML = """
-[frontends]
+    def __init__(self, traefik_client, update=True):
+        if not isinstance(traefik_client, TraefikClient):
+            raise ValueError("traefik_client is not a valid instance of TraefikClient")
 
-[backends]
-"""
-
-    def __init__(self, scheduler, scheduler_delay, rules_file, update=True, debug=False):
-        self.scheduler = scheduler
-        self.scheduler_delay = int(scheduler_delay)
-        self.rules_file = rules_file
-        self.debug = debug
-        self.update = update
+        self._traefik = traefik_client
         self.frontends = {}
         self.backends = {}
-        self.modified = False
-
-    def _schedule_flush(self):
-        self.dispatcher.tell(self, Schedule("rules:flush", self.scheduler_delay), self.scheduler)
+        self._update = bool(update)
 
     def onStart(self, dispatcher):
         self.dispatcher = dispatcher
-        self._schedule_flush()
 
     def onMessage(self, origin, message):
-        if isinstance(message, Happening) and message.event == "rules:flush":
-            self.write_rules()
-            self._schedule_flush()
+        if isinstance(message, NodeActive):
+            logger.info("Handling NodeActive")
+            self.__upsert_frontend(message)
+            self.__upsert_backend(message)
+            self.__reconfigure()
+        elif isinstance(message, NodeExpired):
+            logger.info("Handling NodeExpired")
+            self.__remove_frontend(message)
+            self.__remove_backend(message)
+            self.__reconfigure()
 
-    def add_frontend(self, active):
-        fe_id = active.service
-        fe_version = active.version  # TODO(need version awareness)
+    def __reconfigure(self):
+        routes = {'frontends': self.frontends, 'backends': self.backends}
+        if self._update:
+            logger.debug("Reconfiguring Traefik",
+                         extra={'frontends_count': len(self.frontends), 'backends_count': len(self.backends)})
+
+            self._traefik.reconfigure(routes)
+
+    def __upsert_frontend(self, active):
+        node = active.node
+
+        fe_id = node.service
+        fe_version = node.version  # TODO(need version awareness)
         be_id = fe_id
 
         if fe_id not in self.frontends:
@@ -103,17 +103,20 @@ class RouteManager(object):
         if 'api' not in fe_routes:
             fe_routes['api'] = {}
 
-        fe_routes['api'] = {'rule': 'PathPrefixStrip: /{}'.format(active.service)}
+        fe_routes['api'] = {'rule': 'PathPrefixStrip: /{}'.format(node.service)}
 
-    def remove_frontend(self, expire):
-        fe_id = expire.service
+    def __remove_frontend(self, expire):
+        node = expire.node
 
-        if fe_id not in self.backends:
+        fe_id = node.service
+
+        if fe_id in self.frontends:
             del self.frontends[fe_id]
 
-    def add_backend(self, active):
-        be_id = active.service
-        props = active.properties if active.properties is not None else {}
+    def __upsert_backend(self, active):
+        node = active.node
+        be_id = node.service
+        props = node.properties if node.properties is not None else {}
 
         if be_id not in self.backends:
             logger.debug("Adding new backend (id: %s)", be_id)
@@ -125,87 +128,25 @@ class RouteManager(object):
         node_id = props['datawire_nodeId']
 
         be_servers = self.backends[be_id]['servers']
-        be_servers[node_id] = {'url': active.address}
+        be_servers[node_id] = {'url': node.address}
 
-    def remove_backend(self, expire):
-        be_id = expire.service
-        props = expire.properties if expire.properties is not None else {}
+    def __remove_backend(self, expire):
+        node = expire.node
+        be_id = node.service
+        props = node.properties if node.properties is not None else {}
 
-        if be_id not in self.backends:
-            return
+        if be_id in self.backends:
+            node_id = props['datawire_nodeId']
+            be_servers = self.backends[be_id]['servers']
 
-        node_id = props['datawire_nodeId']
-        be_servers = self.backends[be_id]['servers']
-
-        if node_id in be_servers:
-            del be_servers[node_id]
-            if len(be_servers) == 0:
-                del self.backends[be_id]
-
-    def add_service_route(self, active):
-        self.add_frontend(active)
-        self.add_backend(active)
-        self.modified = True
-
-    def remove_service_route(self, expire):
-        self.remove_backend(expire)
-        self.remove_frontend(expire)
-        self.modified = True
-
-    def write_rules(self):
-        if self.modified:
-            logger.info("Routing rules modified. Routing rules file will be rewritten.")
-
-            # The below code creates the appropriate dictionary structure for the Traefik routing file. However, there
-            # is an issue and I do not know whether it is related to the Python's TOML emitter, Traefik's Go TOML parser
-            # or an issue with the TOML specification I do not clearly understand.
-            #
-            # The situation is this:
-            # ----------------------
-            #
-            #   1. Traefik can have zero routes in it (default state).
-            #   2. Traefik expects that the routes file be "well-formed" and contain "frontends" and "backends"
-            #      sections regardless of whether they are empty (no routes) or populated (some routes).
-            #   3. The Python TOML library interprets Python dictionary {'frontends': {}, 'backends': {}} as empty and
-            #      emits TOML that looks like this " ".
-            #   4. The Python TOML library seems incorrect. I would expect the serialized form to be near equivalent to
-            #
-            #        """
-            #        [frontends]
-            #
-            #        [backends]
-            #
-            #        """
-            #
-            #   5. The Traefik Go TOML parser does not accept empty nothingness OR the Traefik server decides a blank
-            #      file is invalid and does not reload.
-            #   6. Because Traefik does not reload then old routes stay in the server when a situation where ALL
-            #      [frontends] and [backends] are removed.
-            #
-            # Resolution:
-            # ----------
-            #
-            #   1. When there are no frontends or backends to emit (the {'frontends': {}, 'backends': {}} case) then
-            #      the program should output the statically defined string described above in <4>.
-            #   2. When there are frontends or backends to emit then the Python TOML library should be used.
-            #
-            # Hooray for stupid esoteric configuration formats!
-            #
-            rules = {'frontends': self.frontends, 'backends':  self.backends}
-            rules_toml = RouteManager._EMPTY_RULES_TOML
-            if rules != {'frontends': {}, 'backends': {}}:
-                rules_toml = toml.dumps(rules)
-
-            if self.update:
-                with open(self.rules_file, 'w+') as f:
-                    f.write(rules_toml)
-        else:
-            logger.info("Routing rules not modified. Routing rules file will not be rewritten.")
+            if node_id in be_servers:
+                del be_servers[node_id]
+                if len(be_servers) == 0:
+                    del self.backends[be_id]
 
 
 def listen(args):
 
-    rules_file = args['<rules-file>']
     update = not bool(args.get('--no-update', False))
 
     if bool(args.get('--debug', False)):
@@ -213,26 +154,27 @@ def listen(args):
         logger.setLevel(logging.DEBUG)
 
     if update:
-        logger.info("Configured to update routing rules (file: %s)", rules_file)
+        logger.info("Configured to update routing rules.")
     else:
         logger.warn("Configured to not update routing rules. Started with (--no-update) flag.")
 
-    mdk = init()
+    traefik = TraefikClient(args['--traefik-addr'])
+    routes_actor = RouteManager(traefik)
+
     mdk_runtime = defaultRuntime()
+    mdk_runtime.dependencies.registerService("failurepolicy_factory", CircuitBreakerFactory())
 
-    routes = RouteManager(mdk_runtime.getScheduleService(), 5, rules_file, update=update)
-    mdk_runtime.dispatcher.startActor(routes)
-
-    mdk._disco = ApiGatewayDiscovery(mdk_runtime, routes).withToken(os.getenv("DATAWIRE_TOKEN")).connect().start()
-    mdk.start()
+    client = mdk_discovery.protocol.createClient(routes_actor, os.environ["DATAWIRE_TOKEN"], mdk_runtime)
+    mdk_runtime.dispatcher.startActor(client)
+    client.start()
 
 
 def run_listener(args):
-
+    logger.info("Starting API Gateway Listener")
     if args['listen']:
         listen(args)
-    else:
-        exit()
+
+    return
 
 
 def main():

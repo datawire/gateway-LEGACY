@@ -43,11 +43,8 @@ ProvidersThrottleDuration = 5
 defaultEntryPoints=["http"]
 [entryPoints]
   [entryPoints.http]
-  address = ":32990"
+  address = ":8080"
 
 [web]
-address = ":7888"
+address = ":8000"
 
-[file]
-filename = "rules.toml"
-watch    = true

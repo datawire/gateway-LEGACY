@@ -12,4 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .version import __version__
+
+def log_formatter(x):
+    return ['%({0:s})'.format(i) for i in x]
+
+log_format_keys = [
+    'asctime',
+    'levelname',
+    'module',
+    'message'
+]
+
+log_format = ' '.join(log_formatter(log_format_keys))
