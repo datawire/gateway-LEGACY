@@ -16,6 +16,7 @@ packer.json
 # --- Python ---
 virtualenv
 venv
+*.pyc
 
 # --- Quark ---
 quark

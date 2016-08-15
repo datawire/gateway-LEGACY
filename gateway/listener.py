@@ -169,7 +169,6 @@ def listen(args):
 
     client = mdk_discovery.protocol.createClient(routes_actor, os.environ["DATAWIRE_TOKEN"], mdk_runtime)
     mdk_runtime.dispatcher.startActor(client)
-    client.start()
 
 
 def run_listener(args):
