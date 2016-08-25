@@ -1,1 +1,1 @@
-https://raw.githubusercontent.com/datawire/mdk/develop/quark/mdk-2.0.q
+https://raw.githubusercontent.com/datawire/mdk/v2.0.3/quark/mdk-2.0.q

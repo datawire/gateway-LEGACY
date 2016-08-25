@@ -33,13 +33,14 @@ Options:
 
 from docopt import docopt
 from mdk_discovery import NodeActive, NodeExpired, CircuitBreakerFactory
-from mdk_runtime import defaultRuntime, Schedule, Happening
+from mdk_runtime import defaultRuntime
 from traefik import TraefikClient
 
 from gateway import log_format
 import logging
 import mdk_discovery
 import os
+import semantic_version
 import sys
 
 from pythonjsonlogger import jsonlogger
@@ -70,14 +71,13 @@ class RouteManager(object):
     def onMessage(self, origin, message):
         if isinstance(message, NodeActive) or isinstance(message, NodeExpired):
             if isinstance(message, NodeActive):
-                self.__upsert_frontend(message)
+                self.upsert_frontend(message)
                 self.__upsert_backend(message)
             elif isinstance(message, NodeExpired):
                 self.__remove_frontend(message)
                 self.__remove_backend(message)
 
             self.__reconfigure()
-
 
     def __reconfigure(self):
         routes = {'frontends': self.frontends, 'backends': self.backends}
@@ -87,12 +87,9 @@ class RouteManager(object):
 
             self._traefik.reconfigure(routes)
 
-    def __upsert_frontend(self, active):
-        node = active.node
-
-        fe_id = node.service
-        fe_version = node.version  # TODO(need version awareness)
-        be_id = fe_id
+    def __upsert_frontend(self, node, props, version):
+        fe_id = "fe-{}-v{}".format(node.service, version)
+        be_id = 'be-{}-v{}'.format(node.service, version)
 
         if fe_id not in self.frontends:
             logger.info("Adding new frontend (id: %s)", fe_id)
@@ -104,7 +101,84 @@ class RouteManager(object):
         if 'api' not in fe_routes:
             fe_routes['api'] = {}
 
-        fe_routes['api'] = {'rule': 'PathPrefixStrip: /{}'.format(node.service)}
+        path_prefix_format = props.get('MDK_GATEWAY_PATH_PREFIX', '/$(SERVICE_NAME)s/api/v$(SERVICE_VERSION)s')
+        path_prefix = path_prefix_format.strip().format({
+            'SERVICE_NAME': node.service,
+            'SERVICE_VERSION': node.version
+        })
+
+        if not path_prefix.startswith("/"):
+            path_prefix = "/" + path_prefix
+
+        fe_routes['api'] = {
+            'rule': 'PathPrefixStrip: {}'.format(path_prefix)
+        }
+
+    def __upsert_semver_frontend(self, node, props, semver):
+        for version in [str(semver.major), "{}.{}".format(semver.major, semver.minor), str(semver)]:
+            self.__upsert_frontend(node, props, version)
+
+    def upsert_frontend(self, active):
+        #
+        # In Traefik a frontend maps a URL path to a backend which is a set of 1 or more service nodes. When we handle
+        # adding a frontend we actually want to create between 1 and 3 different mappings.
+        #
+        # ==================================
+        # NON SEMANTICALLY VERSIONED SERVICE
+        # ==================================
+        #
+        # Given a service "foobar" and a version that is NOT semantically versioned ("semver") we can only create one
+        # mapping (exact). So if your versioning scheme uses monotonic increments as an example then the API gateway
+        # will only create a single URL path:
+        #
+        # Example 1
+        # ---------
+        #   node.service = "foobar"
+        #   node.version = "3"
+        #
+        #   By default becomes /foobar/api/v3
+        #
+        # Example 2
+        # ---------
+        #   node.service = "foobar"
+        #   node.version = "1.2" (note this is not semver compliant)*
+        #
+        #   By default becomes /foobar/api/v1.2
+        #
+        #   * We can likely eventually fudge these into semver since I expect two-digit versions to be fairly common.
+        #
+        # ==============================
+        # SEMANTICALLY VERSIONED SERVICE
+        # ==============================
+        #
+        # Given a service "foobar" and a version that IS semantically versioned ("semver") we can create many useful
+        # mappings with three of them being very common and often desired:
+        #
+        #   1. Map $major version to all backends that satisfy the major backend version.
+        #   2. Map $major.$minor to all backends that satisfy the $major.$minor backend version.
+        #   3. Map the exact version to all backends that satisfy the exact backend version.
+        #
+        #   * We can map $major.$minor.$patch too, but it seems like unnecessary overkill until it is asked for.
+        #
+        # Example 1
+        # ---------
+        #   node.service = "foobar"
+        #   node.version = "1.33.711-alpha"
+        #
+        #   By default the following frontends are created:
+        #       /foobar/api/v1
+        #       /foobar/api/v1.33
+        #       /foobar/api/v1.33.711-alpha*
+        #
+        #   * We will likely need to do some URL fudging to make compliant URLs if semver uses any invalid URL chars.
+        #
+        node = active.node
+        props = node.properties if node.properties is not None else {}
+
+        if semantic_version.validate(node.version):
+            self.__upsert_semver_frontend(node, props, semantic_version.Version(node.version))
+        else:
+            self.__upsert_frontend(node, props, node.version)
 
     def __remove_frontend(self, expire):
         node = expire.node
