@@ -18,7 +18,7 @@ build:
  
 docker:
 	# Produces a Docker image.
-	docker build -t $(DOCKER_REPO):$(SERVICE_VERSION) -t $(DOCKER_REPO):latest .
+	docker build -t $(DOCKER_REPO):$(SERVICE_VERSION) .
 
 docker-bash:
 	docker run -i -t --entrypoint /bin/bash datawire/fluxcapacitor:$(SERVICE_VERSION)

@@ -1,9 +1,9 @@
 {
-    "_datawirefileVersion": 1
+    "_datawirefileVersion": 1,
 
     "service": {
         "name": "api-gateway",
-        "version": "0.2.0"
+        "version": "0.2.1-dev"
     },
 
     "docker": {
