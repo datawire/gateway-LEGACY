@@ -8,11 +8,12 @@ LABEL PROJECT_REPO_URL = "git@github.com:datawire/gateway.git" \
 
 ENV SUPERVISOR_VERSION="3.3.0" TRAEFIK_VERSION="1.0.2"
 
-WORKDIR /opt/datawire/fluxcapacitor/gateway
-COPY gateway/ ./
-
-WORKDIR /opt/datawire/fluxcapacitor
-COPY requirements.txt requirements-quark.txt entrypoint.sh traefik.toml ./
+WORKDIR /opt/fluxcapacitor/gateway
+COPY requirements.txt \
+     requirements-quark.txt \
+     entrypoint.sh \
+     traefik.toml \
+     ./
 
 RUN apk --no-cache add \
     bash \

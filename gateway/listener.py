@@ -71,8 +71,8 @@ class RouteManager(object):
     def onMessage(self, origin, message):
         if isinstance(message, NodeActive) or isinstance(message, NodeExpired):
             if isinstance(message, NodeActive):
+                self.upsert_backend(message)
                 self.upsert_frontend(message)
-                self.__upsert_backend(message)
             elif isinstance(message, NodeExpired):
                 self.__remove_frontend(message)
                 self.__remove_backend(message)
@@ -87,6 +87,38 @@ class RouteManager(object):
 
             self._traefik.reconfigure(routes)
 
+    def upsert_backend(self, active):
+        node = active.node
+        props = node.properties if node.properties is not None else {}
+
+        if semantic_version.validate(node.version):
+            self.__upsert_semver_backend(node, props, semantic_version.Version(node.version))
+        else:
+            self.__upsert_backend(node, props, node.version)
+
+    def __upsert_backend(self, node, props, version):
+        be_id = 'be-{}-v{}'.format(node.service, version)
+
+        if be_id not in self.backends:
+            logger.info("Adding new backend (id: %s)", be_id)
+            self.backends[be_id] = {
+                'LoadBalancer': {
+                    'method': 'drr'
+                },
+                'servers': {}
+            }
+        else:
+            logger.debug("Backend already present (id: %s)", be_id)
+
+        node_id = props['datawire_nodeId']
+
+        be_servers = self.backends[be_id]['servers']
+        be_servers[node_id] = {'url': node.address}
+
+    def __upsert_semver_backend(self, node, props, semver):
+        for version in [str(semver.major), "{}.{}".format(semver.major, semver.minor), str(semver)]:
+            self.__upsert_backend(node, props, version)
+
     def __upsert_frontend(self, node, props, version):
         fe_id = "fe-{}-v{}".format(node.service, version)
         be_id = 'be-{}-v{}'.format(node.service, version)
@@ -94,6 +126,8 @@ class RouteManager(object):
         if fe_id not in self.frontends:
             logger.info("Adding new frontend (id: %s)", fe_id)
             self.frontends[fe_id] = {'backend': be_id, 'routes': {}}
+        else:
+            logger.debug("Frontend already present (id: %s)", be_id)
 
         fe = self.frontends[fe_id]
         fe_routes = fe['routes']
@@ -101,14 +135,14 @@ class RouteManager(object):
         if 'api' not in fe_routes:
             fe_routes['api'] = {}
 
-        path_prefix_format = props.get('MDK_GATEWAY_PATH_PREFIX', '/$(SERVICE_NAME)s/api/v$(SERVICE_VERSION)s')
-        path_prefix = path_prefix_format.strip().format({
+        path_prefix_format = props.get('MDK_GATEWAY_PATH_PREFIX', '/%(SERVICE_NAME)s/api/v%(SERVICE_VERSION)s')
+        path_prefix = path_prefix_format.strip() % {
             'SERVICE_NAME': node.service,
             'SERVICE_VERSION': node.version
-        })
+        }
 
         if not path_prefix.startswith("/"):
-            path_prefix = "/" + path_prefix
+            path_prefix = '/' + path_prefix
 
         fe_routes['api'] = {
             'rule': 'PathPrefixStrip: {}'.format(path_prefix)
@@ -189,23 +223,6 @@ class RouteManager(object):
             logger.info("Removing frontend (id: %s)", fe_id)
             del self.frontends[fe_id]
 
-    def __upsert_backend(self, active):
-        node = active.node
-        be_id = node.service
-        props = node.properties if node.properties is not None else {}
-
-        if be_id not in self.backends:
-            logger.info("Adding new backend (id: %s)", be_id)
-            self.backends[be_id] = {
-                'LoadBalancer': {'method': 'drr'},
-                'servers': {}
-            }
-
-        node_id = props['datawire_nodeId']
-
-        be_servers = self.backends[be_id]['servers']
-        be_servers[node_id] = {'url': node.address}
-
     def __remove_backend(self, expire):
         node = expire.node
         be_id = node.service
@@ -239,9 +256,9 @@ def listen(args):
     routes_actor = RouteManager(traefik)
 
     mdk_runtime = defaultRuntime()
-    mdk_runtime.dependencies.registerService("failurepolicy_factory", CircuitBreakerFactory())
+    mdk_runtime.dependencies.registerService("failurepolicy_factory", CircuitBreakerFactory(mdk_runtime))
 
-    client = mdk_discovery.protocol.createClient(routes_actor, os.environ["DATAWIRE_TOKEN"], mdk_runtime)
+    client = mdk_discovery.protocol.DiscoClientFactory(os.environ["DATAWIRE_TOKEN"]).create(routes_actor, mdk_runtime)
     mdk_runtime.dispatcher.startActor(client)
 
 

@@ -1,6 +1,8 @@
 # Makefile: fluxcapacitor
 
-VERSION=$(shell cat VERSION)
+SERVICE_NAME=$(shell cat Datawirefile | python -c 'import sys, json; print json.load(sys.stdin)["service"]["name"]')
+SERVICE_VERSION=$(shell cat Datawirefile | python -c 'import sys, json; print json.load(sys.stdin)["service"]["version"]')
+
 QUARK_REQUIREMENTS=$(shell sed -e '/^[[:space:]]*$$/d' -e '/^[[:space:]]*\#/d' requirements-quark.txt | tr '\n' ' ' )
 
 DOCKER_REPO=datawire/fluxcapacitor
@@ -16,10 +18,10 @@ build:
  
 docker:
 	# Produces a Docker image.
-	docker build -t $(DOCKER_REPO):$(VERSION) -t $(DOCKER_REPO):latest .
+	docker build -t $(DOCKER_REPO):$(SERVICE_VERSION) -t $(DOCKER_REPO):latest .
 
 docker-bash:
-	docker run -i -t --entrypoint /bin/bash datawire/fluxcapacitor:$(VERSION)
+	docker run -i -t --entrypoint /bin/bash datawire/fluxcapacitor:$(SERVICE_VERSION)
  
 clean:
 	# Clean previous build outputs (e.g. class files) and temporary files. Customize as needed.
@@ -50,13 +52,12 @@ run-dev: venv
 	# Run the service or application in development mode.
 	venv/bin/python service/service.py
 
-run-docker: docker
-	# Run the service or application in production mode.
-	docker run --rm --net="host" --name datawire-fluxcapacitor -e DATAWIRE_TOKEN=$(DATAWIRE_TOKEN) -it -p 8000:8000 -p 8080:8080 $(DOCKER_REPO):$(VERSION)
+run-docker: docker run-docker-no-rebuild
+	:
 
 run-docker-no-rebuild:
 	# Run the service or application in production mode.
-	docker run --rm --net="host" --name datawire-fluxcapacitor -e DATAWIRE_TOKEN=$(DATAWIRE_TOKEN) -it -p 8000:8000 -p 8080:8080 $(DOCKER_REPO):$(VERSION)
+	docker run --rm --net="host" --name datawire-fluxcapacitor -e DATAWIRE_TOKEN=$(DATAWIRE_TOKEN) -it -p 8000:8000 -p 8080:8080 $(DOCKER_REPO):$(SERVICE_VERSION)
 	
 test: venv
 	# Run the full test suite.

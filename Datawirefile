@@ -1,0 +1,12 @@
+{
+    "_datawirefileVersion": 1
+
+    "service": {
+        "name": "api-gateway",
+        "version": "0.2.0"
+    },
+
+    "docker": {
+        "registryAddress": "docker.io"
+    }
+}
