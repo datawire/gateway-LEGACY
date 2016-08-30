@@ -153,59 +153,6 @@ class RouteManager(object):
             self.__upsert_frontend(node, props, version)
 
     def upsert_frontend(self, active):
-        #
-        # In Traefik a frontend maps a URL path to a backend which is a set of 1 or more service nodes. When we handle
-        # adding a frontend we actually want to create between 1 and 3 different mappings.
-        #
-        # ==================================
-        # NON SEMANTICALLY VERSIONED SERVICE
-        # ==================================
-        #
-        # Given a service "foobar" and a version that is NOT semantically versioned ("semver") we can only create one
-        # mapping (exact). So if your versioning scheme uses monotonic increments as an example then the API gateway
-        # will only create a single URL path:
-        #
-        # Example 1
-        # ---------
-        #   node.service = "foobar"
-        #   node.version = "3"
-        #
-        #   By default becomes /foobar/api/v3
-        #
-        # Example 2
-        # ---------
-        #   node.service = "foobar"
-        #   node.version = "1.2" (note this is not semver compliant)*
-        #
-        #   By default becomes /foobar/api/v1.2
-        #
-        #   * We can likely eventually fudge these into semver since I expect two-digit versions to be fairly common.
-        #
-        # ==============================
-        # SEMANTICALLY VERSIONED SERVICE
-        # ==============================
-        #
-        # Given a service "foobar" and a version that IS semantically versioned ("semver") we can create many useful
-        # mappings with three of them being very common and often desired:
-        #
-        #   1. Map $major version to all backends that satisfy the major backend version.
-        #   2. Map $major.$minor to all backends that satisfy the $major.$minor backend version.
-        #   3. Map the exact version to all backends that satisfy the exact backend version.
-        #
-        #   * We can map $major.$minor.$patch too, but it seems like unnecessary overkill until it is asked for.
-        #
-        # Example 1
-        # ---------
-        #   node.service = "foobar"
-        #   node.version = "1.33.711-alpha"
-        #
-        #   By default the following frontends are created:
-        #       /foobar/api/v1
-        #       /foobar/api/v1.33
-        #       /foobar/api/v1.33.711-alpha*
-        #
-        #   * We will likely need to do some URL fudging to make compliant URLs if semver uses any invalid URL chars.
-        #
         node = active.node
         props = node.properties if node.properties is not None else {}
 
@@ -214,19 +161,40 @@ class RouteManager(object):
         else:
             self.__upsert_frontend(node, props, node.version)
 
-    def __remove_frontend(self, expire):
+    def remove_frontend(self, expire):
         node = expire.node
+        props = node.properties if node.properties is not None else {}
 
-        fe_id = node.service
+        if semantic_version.validate(node.version):
+            self.__remove_semver_frontend(node, props, semantic_version.Version(node.version))
+        else:
+            self.__remove_frontend(node, props, node.version)
 
+    def __remove_semver_frontend(self, node, props, semver):
+        for version in [str(semver.major), "{}.{}".format(semver.major, semver.minor), str(semver)]:
+            self.__remove_frontend(node, props, version)
+
+    def __remove_frontend(self, node, props, version):
+        fe_id = "fe-{}-v{}".format(node.service, version)
         if fe_id in self.frontends:
             logger.info("Removing frontend (id: %s)", fe_id)
             del self.frontends[fe_id]
 
-    def __remove_backend(self, expire):
+    def remove_backend(self, expire):
         node = expire.node
-        be_id = node.service
         props = node.properties if node.properties is not None else {}
+
+        if semantic_version.validate(node.version):
+            self.__remove_semver_frontend(node, props, semantic_version.Version(node.version))
+        else:
+            self.__remove_frontend(node, props, node.version)
+
+    def __remove_semver_backend(self, node, props, semver):
+        for version in [str(semver.major), "{}.{}".format(semver.major, semver.minor), str(semver)]:
+            self.__remove_frontend(node, props, version)
+
+    def __remove_backend(self, node, props, version):
+        be_id = "be-{}-v{}".format(node.service, version)
 
         if be_id in self.backends:
             logger.info("Removing backend (id: %s)", be_id)
