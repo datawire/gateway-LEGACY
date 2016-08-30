@@ -185,13 +185,13 @@ class RouteManager(object):
         props = node.properties if node.properties is not None else {}
 
         if semantic_version.validate(node.version):
-            self.__remove_semver_frontend(node, props, semantic_version.Version(node.version))
+            self.__remove_semver_backend(node, props, semantic_version.Version(node.version))
         else:
-            self.__remove_frontend(node, props, node.version)
+            self.__remove_backend(node, props, node.version)
 
     def __remove_semver_backend(self, node, props, semver):
         for version in [str(semver.major), "{}.{}".format(semver.major, semver.minor), str(semver)]:
-            self.__remove_frontend(node, props, version)
+            self.__remove_backend(node, props, version)
 
     def __remove_backend(self, node, props, version):
         be_id = "be-{}-v{}".format(node.service, version)
