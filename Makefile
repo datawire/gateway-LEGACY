@@ -21,7 +21,7 @@ docker:
 	docker build -t $(DOCKER_REPO):$(SERVICE_VERSION) .
 
 docker-bash:
-	docker run -i -t --entrypoint /bin/bash datawire/fluxcapacitor:$(SERVICE_VERSION)
+	docker run -i -t --entrypoint /bin/bash $(DOCKER_REPO):$(SERVICE_VERSION)
  
 clean:
 	# Clean previous build outputs (e.g. class files) and temporary files. Customize as needed.
@@ -43,10 +43,10 @@ quark-requirements-venv: venv
 	)
 
 publish: docker
-	docker push datawire/fluxcapacitor
+	docker push $(DOCKER_REPO)
 
 publish-no-build:
-	docker push datawire/fluxcapacitor
+	docker push $(DOCKER_REPO)
 	
 run-dev: venv
 	# Run the service or application in development mode.
