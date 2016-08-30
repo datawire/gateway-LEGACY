@@ -6,38 +6,28 @@ LABEL PROJECT_REPO_URL = "git@github.com:datawire/gateway.git" \
       VENDOR = "Datawire" \
       VENDOR_URL = "https://datawire.io/"
 
-ENV SUPERVISOR_VERSION="3.3.0" TRAEFIK_VERSION="1.0.2"
+ENV TRAEFIK_VERSION="1.0.2"
 
-WORKDIR /opt/fluxcapacitor/gateway
+WORKDIR /opt/fluxcapacitor
 COPY requirements.txt \
-     requirements-quark.txt \
      entrypoint.sh \
      traefik.toml \
      ./
 
+COPY gateway/ ./gateway
+
 RUN apk --no-cache add \
     bash \
     ca-certificates \
-    curl \
-    ncurses \
     python \
     py-pip \
-    py-virtualenv \
     wget \
   && ln -snf /bin/bash /bin/sh \
   && wget https://github.com/containous/traefik/releases/download/v${TRAEFIK_VERSION}/traefik \
   && chmod +x traefik \
   && pip install -U  pip \
-  && pip install -Ur requirements.txt supervisor==${SUPERVISOR_VERSION} \
+  && pip install -Ur requirements.txt \
   && rm requirements.txt
-
-# Install Datawire MDK (used by Datawire Gateway)
-ADD https://raw.githubusercontent.com/datawire/quark/master/install.sh .
-ENV PATH $HOME/.quark/bin:$PATH
-RUN bash install.sh
-
-RUN ${HOME}/.quark/bin/quark install \
-    --python $(sed -e '/^[[:space:]]*$$/d' -e '/^[[:space:]]*\#/d' requirements-quark.txt | tr '\n' ' ' )
 
 EXPOSE 8080 8000
 ENTRYPOINT ["./entrypoint.sh"]
