@@ -138,7 +138,7 @@ class RouteManager(object):
         path_prefix_format = props.get('MDK_GATEWAY_PATH_PREFIX', '/%(SERVICE_NAME)s/api/v%(SERVICE_VERSION)s')
         path_prefix = path_prefix_format.strip() % {
             'SERVICE_NAME': node.service,
-            'SERVICE_VERSION': node.version
+            'SERVICE_VERSION': version
         }
 
         if not path_prefix.startswith("/"):
