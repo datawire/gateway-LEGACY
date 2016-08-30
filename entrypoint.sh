@@ -14,4 +14,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+if [ -f /etc/minimal-resolv.conf ]; then
+    if [ -f /etc/resolv.conf ]; then
+        cp /etc/resolv.conf /etc/dnsmasq-resolv.conf
+    else
+        echo "nameserver 10.0.0.10" > /etc/dnsmasq-resolv.conf
+    fi
+
+    cat /etc/minimal-resolv.conf > /etc/resolv.conf
+    rm /etc/minimal-resolv.conf
+fi
+
+dnsmasq --local-service
+
 (python -m gateway.listener listen &) && ./traefik -c traefik.toml -d

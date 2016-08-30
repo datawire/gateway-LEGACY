@@ -14,11 +14,14 @@ COPY requirements.txt \
      traefik.toml \
      ./
 
+COPY config/ ./config
 COPY gateway/ ./gateway
 
 RUN apk --no-cache add \
     bash \
     ca-certificates \
+    dnsmasq \
+    drill \
     python \
     py-pip \
     wget \
@@ -27,7 +30,9 @@ RUN apk --no-cache add \
   && chmod +x traefik \
   && pip install -U  pip \
   && pip install -Ur requirements.txt \
-  && rm requirements.txt
+  && rm requirements.txt \
+  && mv config/dnsmasq.conf /etc/dnsmasq.conf \
+  && mv config/minimal-resolv.conf /etc/minimal-resolv.conf
 
 EXPOSE 8080 8000
 ENTRYPOINT ["./entrypoint.sh"]
