@@ -2,8 +2,25 @@
     "_datawirefileVersion": 1,
 
     "service": {
-        "name": "api-gateway",
-        "version": "0.2.6-dev"
+        "name"    : "api-gateway",
+        "version" : "0.2.7",
+
+        "ext": {
+            "kubernetes": {
+                "service": true,
+                "targetPort": 8080
+                "ports": [
+                    {
+                        "name": "http",
+                        "port": 80,
+                    }
+                ],
+                "healthCheck": {
+                    "path": "/health",
+                    "port": 8000
+                }
+            }
+        }
     },
 
     "docker": {
