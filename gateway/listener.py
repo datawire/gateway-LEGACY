@@ -69,23 +69,50 @@ class RouteManager(object):
         self.dispatcher = dispatcher
 
     def onMessage(self, origin, message):
-        if isinstance(message, NodeActive) or isinstance(message, NodeExpired):
-            if isinstance(message, NodeActive):
-                self.upsert_backend(message)
-                self.upsert_frontend(message)
-            elif isinstance(message, NodeExpired):
-                self.__remove_frontend(message)
-                self.__remove_backend(message)
+        if message.__class__ not in {NodeActive, NodeExpired}:
+            pass
 
-            self.__reconfigure()
+        message.node = RouteManager.__normalize_node(message.node)
+        if isinstance(message, NodeActive) and RouteManager.__is_public(message.node):
+            self.upsert_backend(message)
+            self.upsert_frontend(message)
+        elif isinstance(message, NodeExpired):
+            self.remove_frontend(message)
+            self.remove_backend(message)
+
+        self.__reconfigure()
 
     def __reconfigure(self):
-        routes = {'frontends': self.frontends, 'backends': self.backends}
+        routes = {
+            'frontends': self.frontends,
+            'backends': self.backends
+        }
+
         if self._update:
             logger.debug("Reconfiguring Traefik",
                          extra={'frontends_count': len(self.frontends), 'backends_count': len(self.backends)})
 
             self._traefik.reconfigure(routes)
+
+    @staticmethod
+    def __normalize_node(node):
+        # A little bit of defensive coding to avoid people who assign null where there should not be a null.
+        if node.properties is None:
+            node.properties = {}
+
+        return node
+
+    @staticmethod
+    def __is_public(node):
+        return bool(node.properties.get('MDK_GATEWAY_PUBLIC_SERVICE', False))
+
+    @staticmethod
+    def __create_frontend_id(service, version):
+        return "fe-{}-v{}".format(service, version)
+
+    @staticmethod
+    def __create_backend_id(service, version):
+        return "be-{}-v{}".format(service, version)
 
     def upsert_backend(self, active):
         node = active.node
@@ -116,12 +143,16 @@ class RouteManager(object):
         be_servers[node_id] = {'url': node.address}
 
     def __upsert_semver_backend(self, node, props, semver):
-        for version in [str(semver.major), "{}.{}".format(semver.major, semver.minor), str(semver)]:
-            self.__upsert_backend(node, props, version)
+        # pre-release software is special in semver and doesn't belong in the general population.
+        if not semver.prerelease:
+            for version in [str(semver.major), "{}.{}".format(semver.major, semver.minor)]:
+                self.__upsert_backend(node, props, version)
+
+        self.__upsert_backend(node, props, str(semver))
 
     def __upsert_frontend(self, node, props, version):
-        fe_id = "fe-{}-v{}".format(node.service, version)
-        be_id = 'be-{}-v{}'.format(node.service, version)
+        fe_id = RouteManager.__create_frontend_id(node.service, version)
+        be_id = RouteManager.__create_backend_id(node.service, version)
 
         if fe_id not in self.frontends:
             logger.info("Adding new frontend (id: %s)", fe_id)
@@ -149,8 +180,12 @@ class RouteManager(object):
         }
 
     def __upsert_semver_frontend(self, node, props, semver):
-        for version in [str(semver.major), "{}.{}".format(semver.major, semver.minor), str(semver)]:
-            self.__upsert_frontend(node, props, version)
+        # pre-release software is special in semver and doesn't belong in the general population.
+        if not semver.prerelease:
+            for version in [str(semver.major), "{}.{}".format(semver.major, semver.minor)]:
+                self.__upsert_frontend(node, props, version)
+
+        self.__upsert_frontend(node, props, str(semver))
 
     def upsert_frontend(self, active):
         node = active.node
@@ -175,9 +210,11 @@ class RouteManager(object):
             self.__remove_frontend(node, props, version)
 
     def __remove_frontend(self, node, props, version):
-        fe_id = "fe-{}-v{}".format(node.service, version)
-        if fe_id in self.frontends:
-            logger.info("Removing frontend (id: %s)", fe_id)
+        fe_id = RouteManager.__create_frontend_id(node.service, version)
+        be_id = RouteManager.__create_backend_id(node.service, version)
+
+        if fe_id in self.frontends and len(self.backends.get(be_id, [])) == 0:
+            logger.info("Removing frontend because there are no more backends (id: %s)", fe_id)
             del self.frontends[fe_id]
 
     def remove_backend(self, expire):
@@ -190,8 +227,11 @@ class RouteManager(object):
             self.__remove_backend(node, props, node.version)
 
     def __remove_semver_backend(self, node, props, semver):
-        for version in [str(semver.major), "{}.{}".format(semver.major, semver.minor), str(semver)]:
-            self.__remove_backend(node, props, version)
+        if not semver.prerelease:
+            for version in [str(semver.major), "{}.{}".format(semver.major, semver.minor)]:
+                self.__upsert_backend(node, props, version)
+
+        self.__remove_backend(node, props, semver)
 
     def __remove_backend(self, node, props, version):
         be_id = "be-{}-v{}".format(node.service, version)

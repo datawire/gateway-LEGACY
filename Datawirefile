@@ -3,7 +3,7 @@
 
     "service": {
         "name": "api-gateway",
-        "version": "0.2.5-dev"
+        "version": "0.2.6-dev"
     },
 
     "docker": {
