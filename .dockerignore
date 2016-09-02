@@ -3,7 +3,6 @@
 .gitignore
 
 # --- Docker ---
-Dockerfile
 .dockerignore
 
 # --- IntelliJ IDEA ---
