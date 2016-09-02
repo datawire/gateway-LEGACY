@@ -104,7 +104,8 @@ class RouteManager(object):
 
     @staticmethod
     def __is_public(node):
-        return bool(node.properties.get('MDK_GATEWAY_PUBLIC_SERVICE', False))
+        # This needs to become False in the future I think...
+        return bool(node.properties.get('MDK_GATEWAY_PUBLIC_SERVICE', True))
 
     @staticmethod
     def __create_frontend_id(service, version):
