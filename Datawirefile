@@ -5,8 +5,6 @@
         "name"    : "api-gateway",
         "version" : "0.2.10",
 
-        "replace" : true
-
         "ext": {
             "kubernetes": {
                 "service": true,
