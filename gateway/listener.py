@@ -46,7 +46,7 @@ import sys
 from pythonjsonlogger import jsonlogger
 
 logger = logging.getLogger('listener')
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler(sys.stdout)
 formatter = jsonlogger.JsonFormatter(log_format)
 handler.setFormatter(formatter)
