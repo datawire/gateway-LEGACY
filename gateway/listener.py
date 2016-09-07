@@ -237,6 +237,11 @@ class RouteManager(object):
     def __remove_backend(self, node, props, version):
         be_id = "be-{}-v{}".format(node.service, version)
 
+        import pprint
+
+        print("Removing backend {}".format(node.service))
+        pprint.pprint(props)
+
         if be_id in self.backends:
             logger.info("Removing backend (id: %s)", be_id)
             node_id = props['datawire_nodeId']
@@ -244,8 +249,12 @@ class RouteManager(object):
 
             if node_id in be_servers:
                 del be_servers[node_id]
+                logger.debug("Removed node from backend (node: %s, backend: %s)", node_id, be_id)
                 if len(be_servers) == 0:
                     del self.backends[be_id]
+                    logger.debug("Removed unused backend (backend: %s)", be_id)
+            else:
+                logger.debug("Could not remove unknown node (id: %s)", node_id)
 
 
 def listen(args):
