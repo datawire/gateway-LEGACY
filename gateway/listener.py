@@ -230,7 +230,7 @@ class RouteManager(object):
     def __remove_semver_backend(self, node, props, semver):
         if not semver.prerelease:
             for version in [str(semver.major), "{}.{}".format(semver.major, semver.minor)]:
-                self.__upsert_backend(node, props, version)
+                self.__remove_backend(node, props, version)
 
         self.__remove_backend(node, props, semver)
 
